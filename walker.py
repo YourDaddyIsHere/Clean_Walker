@@ -1,5 +1,8 @@
-import socket
+from __future__ import print_function
+from twisted.internet.protocol import DatagramProtocol
 import logging
+
+import socket
 from random import random
 from crypto import ECCrypto
 from netifaces import AF_INET, AF_INET6, AF_LINK, AF_PACKET, AF_BRIDGE
@@ -10,7 +13,6 @@ from Wcandidate import Wcandidate
 from WcandidateGroup import WcandidateGroup
 from twisted.internet import task
 from twisted.internet import reactor
-from Mylistener import Mylistener
 from struct import pack, unpack_from, Struct
 import Message
 import threading
@@ -19,62 +21,47 @@ logging.basicConfig(level=logging.DEBUG, filename="logfile", filemode="a+",
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-class PlaceHolder:
-    def __init__(self,offset):
-        self.offset = offset
+#now the walker inherits twisted.DatagramProtocol, which is driven by twisted reactor
+#no need to touch socket anymore, can use Protocol.transport to send packet and datagramReceived() for listening
+#Whenever you creates a walker instance, it calls startProtocol() (it is a built-in function of twisted.Protocol)
+#startProtocol() initiates the looping call of take_step, which will send introduction request every 5 seconds.
+#datagramReceived() will keep lisening on the port and call decode_message to handle messages
+#functions named as on_XXXX is message handler for a specific message type.
+#functions like encode_xxxx is the encoder of a specific message type, which convert message instances to binary string
+#functions like decode_xxxx is the decoder of a specific message type, which convert binary string to certain message instances.
+class Walker(DatagramProtocol):
 
-class Mywalker:
-    tracker_ADDR = [
+    def __init__(self,port = 25000):
+        #super(Walker, self).__init__():
+        #tracker_ADDR is reserved for convenience of testing
+        #self.tracker_ADDR = [
         #(u"127.0.0.1"     ,1235),
-        (u"130.161.119.206"      , 6421),
-        (u"130.161.119.206"      , 6422),
-        (u"131.180.27.155"       , 6423),
-        (u"83.149.70.6"          , 6424),
-        (u"95.211.155.142"       , 6427),
-        (u"95.211.155.131"       , 6428),
-        ]
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    WAN_IP = "0.0.0.0"
-    WAN_PORT = 0
-    WAN_ADDR = (WAN_IP,WAN_PORT)
-    #LAN_IP =None
-    #LAN_PORT=30001
-    LAN_NETMASK = ""
-    #LAN_ADDR=""
-    #tracker_ADDR = ("127.0.0.1",20001)
-    WAN_VOTE = {"0.0.0.0:0":[]}
-    candidate_group =WcandidateGroup()
-    BUFSIZE = 2048
-    loop_sender = None
-    loop_listener = None
-    #_listener = None
+        #(u"130.161.119.206"      , 6421),
+        #(u"130.161.119.206"      , 6422),
+        #(u"131.180.27.155"       , 6423),
+        #(u"83.149.70.6"          , 6424),
+        #(u"95.211.155.142"       , 6427),
+        #(u"95.211.155.131"       , 6428),
+        #]
 
-    def __init__(self):
-        #self.get_addr_from_string("192.9.22.111:63")
-        self.lan_ip = self.get_lan_IP()
-        self.lan_port = 25000
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        #get the network interface which connected to public Internet (8.8.8.8,8) is the root DNS server
+        #so that the network interface connected to it is guranteed to be connected to public Internet
+        self.lan_ip = self.get_lan_IP(("8.8.8.8",8))
+        self.lan_port = port
         self.lan_netmask = self.get_netmask(self.lan_ip)
         self.lan_addr = (self.lan_ip,self.lan_port)
+        #we have no knowledge for our wan IP for now.
+        self.wan_ip = "0.0.0.0"
+        self.wan_port =0
         self.wan_addr = ("0.0.0.0",0)
-        self.sock.bind(self.lan_addr)
-        self.loop_sender = task.LoopingCall(self.take_step)
-        self.loop_listener = task.LoopingCall(self.listening)
-        self._listening_thread = threading.Thread(name="the_Listener", target=self.listening)
-        #self._listener = Mylistener(self,self.sock)
-        #bind the socket to a fixed port
+        #self.sock.bind(self.lan_addr)
 
+        #indicates the current wan IP vote contains only 0.0.0.0 and the voter is nothing (empty list)
+        #self.WAN_VOTE = {"0.0.0.0:0":[]}
+        self.WAN_VOTE = dict()
+        self.candidate_group =WcandidateGroup()
         self._global_time=1
-        self.BUFSIZE=1024
-        self._DEFAULT_ADDRESSES = [
-        (u"127.0.0.1"     ,1235),
-        (u"130.161.119.206"      , 6421),
-        (u"130.161.119.206"      , 6422),
-        (u"131.180.27.155"       , 6423),
-        (u"83.149.70.6"          , 6424),
-        (u"95.211.155.142"       , 6427),
-        (u"95.211.155.131"       , 6428),
-        ]
-
 
         self._struct_B = Struct(">B")
         self._struct_BBH = Struct(">BBH")
@@ -135,293 +122,31 @@ class Mywalker:
         #print self.lan_addr
         #this is similar to the container in conversion.encode_message()
         self.container = [self.prefix,chr(246)]
-        #self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        #self.sock.bind(self.lan_addr)
-        self._listening_thread = threading.Thread(name="the_Listener", target=self.listening)
+        self.reactor = reactor
+        self.listening_port=self.reactor.listenUDP(self.lan_port, self)
 
 
-    def get_lan_IP(self):
-        #try to connect to tracker to determine the ip we used
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(self.tracker_ADDR[0])
-        sock_IP = s.getsockname()[0]
-        s.close()
-        return sock_IP
-    @staticmethod
-    def get_addr_from_string(address):
-            #convert a string to (IP,PORT) tuple
-        addr = address.split(":")
-        addr_tuple = (addr[0],addr[1])
-        return addr_tuple
+    def startProtocol(self):
+        print("protocol started")
 
-        #get the majority votes
-    def get_majority_vote(self):
-        max_vote = 0
-        majority = self.WAN_IP+":"+str(self.WAN_PORT)
-        for key in self.WAN_VOTE:
-            num_vote = len(self.WAN_VOTE[key])
-            if num_vote>max_vote:
-                majority = key
-        majority_list = majority.split(":")
-        majority_IP = majority_list[0]
-        majority_PORT = int(majority_list[1])
-        return (majority_IP,majority_PORT)
+        loop = task.LoopingCall(self.take_step)
+        loop.start(5.0)
 
-    #take a wan vote, possible to change the wan address basing on the votes
-    def wan_address_vote(self,address,candidate_addr):
-        assert isinstance(address,tuple),type(address)
-        assert isinstance(candidate_addr,tuple),type(candidate_addr)
-        #@param:addr my address which is perceived by the voter
-        #@param:candidate_addr the candidate's (voter) addr
-        change_flag = 0
-        IP = address[0]
-        PORT = address[1]
-        ADDR = IP+":"+str(PORT)
-        if ADDR in self.WAN_VOTE:
-            candidate_vote_list = self.WAN_VOTE[ADDR]
-            if candidate_addr not in candidate_vote_list:
-                self.WAN_VOTE[ADDR].append(candidate_addr)
-                change_flag = 1
-        else:
-            self.WAN_VOTE[ADDR] = [candidate_addr]
-            change_flag = 1
-        #if there is any update in WAN_VOTE
-        if (change_flag == 1):
-            new_WAN_ADDR = self.get_majority_vote()
-            self.WAN_IP = new_WAN_ADDR[0]
-            self.WAN_PORT=new_WAN_ADDR[1]
-            self.WAN_ADDR = new_WAN_ADDR
-
-    #get a proper candidate to introduce
-    def get_candidate_to_introduce(self,candidate):
-        candidate_to_introduce = self.candidate_group.get_candidate_to_introduce(candidate)
-        return candidate_to_introduce
-    #get a proper candidate to walk
-    def get_candidate_to_walk(self):
-        candidate_to_walk = self.candidate_group.get_candidate_to_walk()
-        return candidate_to_walk
-
-    #one of the function should be looped
+    #take one step
     def take_step(self):
         candidate_to_walk = self.get_candidate_to_walk()
         #print candidate_to_walk
         candidate_to_walk_ADDR = candidate_to_walk.get_WAN_ADDR()
+        #message_puncture_request = self.create_puncture_request(("8.8.8.8",8),("8.8.8.8",8))
         message_introduction_request = self.create_introduction_request(candidate_to_walk_ADDR,self.lan_addr,self.lan_addr)
         #message_puncture_request = self.create_puncture_request(("8.8.8.8",8),("8.8.8.8",8))
 
-        self.sock.sendto(message_introduction_request.packet,candidate_to_walk_ADDR)
+        #self.sock.sendto(message_introduction_request.packet,candidate_to_walk_ADDR)
+        self.transport.write(message_introduction_request.packet,candidate_to_walk_ADDR)
+        #self.transport.write(message_puncture_request.packet,candidate_to_walk_ADDR)
         logger.info("take step to: "+str(candidate_to_walk_ADDR))
-        #print "the candidate to walk_addr is: "
-        #print candidate_to_walk_ADDR
-        #self.sock.sendto(message_puncture_request.packet,candidate_to_walk_ADDR)
 
-
-    #one of the function should be looped
-    def listening(self):
-        while True:
-            print 'wating for message...'  
-            data, addr = self.sock.recvfrom(self.BUFSIZE)  
-            print '...received from and retuned to:',addr
-            self.decode_message(data,addr)
-
-    def decode_message(self,packet,addr):
-        message_id = ord(packet[22])
-        logger.info("message id is:"+str(message_id))
-        print "message id is:"+str(message_id)
-        if message_id == 247:
-            print "here is a missing-identity message"
-            placeholder = PlaceHolder(23)
-            self.on_missing_identity(packet,addr)
-        if message_id == 245:
-            print "here is a introduction-response"
-            #placeholder = PlaceHolder(23)
-            self.on_introduction_response(packet,addr)
-        if message_id == 246:
-            print "here is a introduction-request"
-            #placeholder = PlaceHolder(23)
-            self.on_introduction_request(packet,addr)
-        if message_id == 250:
-            print "here is a puncture request"
-            #placeholder = PlaceHolder(23)
-            self.on_puncture_request(packet,addr)
-        if message_id == 249:
-            print "here is a puncture"
-
-    def decode_introduction_request(self,packet):
-        offset = 23
-        #offset = placeholder.offset
-        if len(packet) < offset + 21:
-            print "insufficient packet length"
-        #MemberAuthentication uses sha1
-        member_id = packet[offset:offset + 20]
-        offset = offset+20
-        #uses directDistribution
-        global_time, = self._struct_Q.unpack_from(packet, offset)
-        print "global time is:" + str(global_time)
-        offset = offset + 8
-        self._global_time = global_time
-
-
-        destination_ip, destination_port = self._struct_4SH.unpack_from(packet, offset)
-        destination_address = (inet_ntoa(destination_ip), destination_port)
-        print "destination address is:"+ str(destination_address)
-        offset += 6
-
-        source_lan_ip, source_lan_port = self._struct_4SH.unpack_from(packet, offset)
-        source_lan_address = (inet_ntoa(source_lan_ip), source_lan_port)
-        print "source_lan_address is: "+ str(source_lan_address)
-        offset += 6
-
-        source_wan_ip, source_wan_port = self._struct_4SH.unpack_from(packet, offset)
-        source_wan_address = (inet_ntoa(source_wan_ip), source_wan_port)
-        print "source_wan_address is: "+str(source_wan_address)
-        offset += 6
-
-        flags, identifier = self._struct_BH.unpack_from(packet, offset)
-        offset += 3
-
-        advice = self._decode_advice_map.get(flags & int("1", 2))
-        print "advice is: "+str(advice)
-
-        signiture = packet[offset:]
-        prefix = packet[0:offset]
-
-        message = Message.introduction_request()
-        message.destination_addr = destination_address
-        message.sender_lan_addr = source_lan_address
-        message.sender_wan_addr = source_wan_address
-        message.identifier = identifier
-        message.mid = member_id
-        message.global_time = global_time
-        message.signiture = signiture
-        message.prefix = self.prefix
-        message.packet = packet
-        return message
-
-
-    def decode_introduction_response(self,packet):
-        #offset = placeholder.offset
-        offset = 23
-        #introduction request use MemberAuthentication
-        member_id = packet[offset:offset + 20]
-        offset = offset+20
-        global_time, = self._struct_Q.unpack_from(packet, offset)
-        self._global_time = global_time
-        print "global time is:" + str(global_time)
-        offset = offset + 8
-        #it is time to decode the payload
-        destination_ip, destination_port = self._struct_4SH.unpack_from(packet, offset)
-        destination_address = (inet_ntoa(destination_ip), destination_port)
-        print "destination address is:"+ str(destination_address)
-        offset += 6
-
-        source_lan_ip, source_lan_port = self._struct_4SH.unpack_from(packet, offset)
-        source_lan_address = (inet_ntoa(source_lan_ip), source_lan_port)
-        print "source_lan_address is: "+ str(source_lan_address)
-        offset += 6
-
-        source_wan_ip, source_wan_port = self._struct_4SH.unpack_from(packet, offset)
-        source_wan_address = (inet_ntoa(source_wan_ip), source_wan_port)
-        print "source_wan_address is: "+str(source_wan_address)
-        offset += 6
-
-        introduce_lan_ip, introduce_lan_port = self._struct_4SH.unpack_from(packet, offset)
-        lan_introduction_address = (inet_ntoa(introduce_lan_ip), introduce_lan_port)
-        print "lan_introduction_address is: "+str(lan_introduction_address)
-        offset += 6
-
-        introduce_wan_ip, introduce_wan_port = self._struct_4SH.unpack_from(packet, offset)
-        wan_introduction_address = (inet_ntoa(introduce_wan_ip), introduce_wan_port)
-        print "wan_introduction_address is:" +str(wan_introduction_address)
-        offset += 6
-
-        flags, identifier, = self._struct_BH.unpack_from(packet, offset)
-        offset += 3
-
-        connection_type = self._decode_connection_type_map.get(flags & int("11000000", 2))
-        print "connection type is: "+ str(connection_type)
-        if connection_type is None:
-            raise DropPacket("Invalid connection type flag")
-
-        tunnel = self._decode_tunnel_map.get(flags & int("100", 2))
-        print "tunnel is:" + str(tunnel)
-        if lan_introduction_address==("0.0.0.0",0) and wan_introduction_address ==("0.0.0.0",0):
-            print "it is an empty introduction response"
-
-        signiture = packet[offset:]
-        prefix = packet[0:offset]
-
-        message = Message.introduction_response()
-        message.destination_addr = destination_address
-        message.sender_lan_addr = source_lan_address
-        message.sender_wan_addr = source_wan_address
-        message.lan_introduction_address = lan_introduction_address
-        message.wan_introduction_address = wan_introduction_address
-        message.identifier = identifier
-        message.mid = member_id
-        message.global_time = global_time
-        message.signiture = signiture
-        message.prefix = self.prefix
-        message.packet = packet
-        return message
-
-
-    def decode_missing_identity(self,packet):
-        offset = 23
-        #offset = placeholder.offset
-        #missing-identity message us NoAuthentication
-        key_length = 0
-        #it use PublicResoulution, so we need to do nothing
-        #it use directDitribution, we need to take out the global time
-        global_time = self._struct_Q.unpack_from(packet,offset)
-        print "the global time is: "+str(global_time[0])
-        self._global_time = global_time[0]
-
-        message = Message.missing_identity()
-        message.packet = packet
-
-    def decode_puncture_request(self,packet):
-        #offset = placeholder.offset
-        offset = 23
-        #puncture-request uses NoAuthentication
-        #puncture-request uses DirectDistribution
-        global_time, = self._struct_Q.unpack_from(packet, offset)
-        print "global time is:" + str(global_time)
-        offset = offset + 8
-
-        if len(packet) < offset + 14:
-            raise DropPacket("Insufficient packet size")
-
-        lan_walker_ip, lan_walker_port = self._struct_4SH.unpack_from(packet, offset)
-        lan_walker_address = (inet_ntoa(lan_walker_ip), lan_walker_port)
-        print "lan_walker_address is: "+ str(lan_walker_address)
-        offset += 6
-
-        wan_walker_ip, wan_walker_port = self._struct_4SH.unpack_from(packet, offset)
-        wan_walker_address = (inet_ntoa(wan_walker_ip), wan_walker_port)
-        print "wan_walker_address is: "+ str(wan_walker_address)
-        offset += 6
-
-        identifier, = self._struct_H.unpack_from(packet, offset)
-        offset += 2
-
-        signiture = packet[offset:]
-        prefix = packet[0:offset]
-
-        message = Message.introduction_response()
-
-        message.lan_walker_addr = lan_walker_address
-        message.wan_walker_addr = wan_walker_address
-        message.identifier = identifier
-        message.global_time = global_time
-        message.signiture = signiture
-        message.prefix = self.prefix
-        message.packet = packet
-        return message
-
-    def decode_puncture(self,packet):
-        pass
-
+    #a bunch of message creator
     def create_introduction_request(self,destination_address,source_lan_address,source_wan_address):
         identifier = int(random() * 2 ** 16)
         data = [inet_aton(destination_address[0]), self._struct_H.pack(destination_address[1]),
@@ -440,7 +165,9 @@ class Mywalker:
         container.extend(data)
         #print container
         packet = "".join(container)
+        #print ("the packet length is: "+str(len(packet)))
         signiture = self.crypto.create_signature(self.my_key, packet)
+        #print ("the signiture length is: "+str(len(signiture)))
         packet = packet + signiture
         #print repr(signiture)
         message = Message.introduction_request()
@@ -571,9 +298,43 @@ class Mywalker:
         message.packet = packet
         return message
 
+
+
+    def datagramReceived(self, data, addr):
+        print("received %r from %s" % (data, addr))
+        #now we receive a UDP datagram, call decode_message to decode it
+        self.decode_message(data,addr)
+        #self.transport.write(data, addr)
+
+    def decode_message(self,packet,addr):
+        message_id = ord(packet[22])
+        logger.info("message id is:"+str(message_id))
+        print("message id is:"+str(message_id))
+        if message_id == 247:
+            print("here is a missing-identity message")
+            #placeholder = PlaceHolder(23)
+            self.on_missing_identity(packet,addr)
+        if message_id == 245:
+            print("here is a introduction-response")
+            #placeholder = PlaceHolder(23)
+            self.on_introduction_response(packet,addr)
+        if message_id == 246:
+            print("here is a introduction-request")
+            #placeholder = PlaceHolder(23)
+            self.on_introduction_request(packet,addr)
+        if message_id == 250:
+            print("here is a puncture request")
+            #placeholder = PlaceHolder(23)
+            self.on_puncture_request(packet,addr)
+        if message_id == 249:
+            print("here is a puncture")
+
+    # a bunch of message handler
     def on_introduction_request(self,packet,addr):
         #placeholder = PlaceHolder(23)
         message_request = self.decode_introduction_request(packet)
+        stumble_candidate = Wcandidate(message_request.sender_lan_addr,addr)
+        self.candidate_group.add_candidate_to_stumble_list(stumble_candidate)
         #do wan_vote
         self.wan_address_vote(message_request.destination_addr,addr)
         #we don't have codes to determine whether the candidate is within our lan, so we use wan address.
@@ -589,43 +350,293 @@ class Mywalker:
         #now it is time to create puncture request
         if candidate_to_introduce!=None:
             message_puncture_request = self.create_puncture_request(message_request.sender_lan_addr,message_request.sender_lan_addr)
-            self.sock.sendto(message_puncture_request,candidate_to_introduce.get_WAN_ADDR())
-            self.sock.sendto(message_puncture_request,candidate_to_introduce.get_LAN_ADDR())
-        self.sock.sendto(message_response.packet,addr)
+            self.transport.write(message_puncture_request.packet,candidate_to_introduce.get_WAN_ADDR())
+            self.transport.write(message_puncture_request.packet,candidate_to_introduce.get_LAN_ADDR())
+        self.transport.write(message_response.packet,addr)
     def on_introduction_response(self,packet,addr):
         #placeholder = PlaceHolder(23)
         message = self.decode_introduction_response(packet)
         self.wan_address_vote(message.destination_addr,addr)
-        print "the introduced candidate is: "+ str(message.wan_introduction_address)
-        if message.wan_introduction_address!=("0.0.0.0",0) and message.lan_introduction_address!=("0.0.0.0",0):
-            introduced_candidate = Wcandidate(message.lan_introduction_address,message.wan_introduction_address)
+        walk_candidate=Wcandidate(message.sender_lan_addr,addr)
+        self.candidate_group.add_candidate_to_walk_list(walk_candidate)
+        print("the introduced candidate is: "+ str(message.wan_introducted_addr))
+        if message.lan_introducted_addr!=("0.0.0.0",0) and message.wan_introducted_addr!=("0.0.0.0",0):
+            introduced_candidate = Wcandidate(message.lan_introducted_addr,message.wan_introducted_addr)
             self.candidate_group.add_candidate_to_intro_list(introduced_candidate)
-            print "new candidate has been added to intro list"
+            print("new candidate has been added to intro list")
     def on_puncture_request(self,packet,addr):
         #placeholder = PlaceHolder(23)
         message_puncture_request = self.decode_puncture_request(packet)
+        lan_walker_address = message_puncture_request.lan_walker_addr
+        wan_walker_address = message_puncture_request.wan_walker_addr
         self.wan_addr = self.get_majority_vote()
-        print "the wan addr from majority vote is:"
-        print self.wan_addr
+        print("the wan addr from majority vote is:")
+        print(self.wan_addr)
         message_puncture = self.create_puncture(message_puncture_request.identifier,self.lan_addr,self.wan_addr)
+        self.transport.write(message_puncture.packet,lan_walker_address)
+        self.transport.write(message_puncture.packet,wan_walker_address)
+
     def on_puncture(self,packet):
         pass
     def on_missing_identity(self,packet,addr):
         message = self.create_identity()
-        self.sock.sendto(message.packet,addr)
+        self.transport.write(message.packet,addr)
     def on_identity(self,packet):
+        pass
+
+    #a bunch of message decoder below:
+    def decode_introduction_request(self,packet):
+        offset = 23
+        #offset = placeholder.offset
+        if len(packet) < offset + 21:
+            print("insufficient packet length")
+        #MemberAuthentication uses sha1
+        member_id = packet[offset:offset + 20]
+        offset = offset+20
+        #uses directDistribution
+        global_time, = self._struct_Q.unpack_from(packet, offset)
+        print("global time is:" + str(global_time))
+        offset = offset + 8
+        self._global_time = global_time
+
+
+        destination_ip, destination_port = self._struct_4SH.unpack_from(packet, offset)
+        destination_address = (inet_ntoa(destination_ip), destination_port)
+        print("destination address is:"+ str(destination_address))
+        offset += 6
+
+        source_lan_ip, source_lan_port = self._struct_4SH.unpack_from(packet, offset)
+        source_lan_address = (inet_ntoa(source_lan_ip), source_lan_port)
+        print("source_lan_address is: "+ str(source_lan_address))
+        offset += 6
+
+        source_wan_ip, source_wan_port = self._struct_4SH.unpack_from(packet, offset)
+        source_wan_address = (inet_ntoa(source_wan_ip), source_wan_port)
+        print("source_wan_address is: "+str(source_wan_address))
+        offset += 6
+
+        flags, identifier = self._struct_BH.unpack_from(packet, offset)
+        offset += 3
+
+        advice = self._decode_advice_map.get(flags & int("1", 2))
+        print("advice is: "+str(advice))
+
+        signiture = packet[offset:]
+        prefix = packet[0:offset]
+
+        message = Message.introduction_request()
+        message.destination_addr = destination_address
+        message.sender_lan_addr = source_lan_address
+        message.sender_wan_addr = source_wan_address
+        message.identifier = identifier
+        message.mid = member_id
+        message.global_time = global_time
+        message.signiture = signiture
+        message.prefix = self.prefix
+        message.packet = packet
+        return message
+
+
+    def decode_introduction_response(self,packet):
+        #offset = placeholder.offset
+        offset = 23
+        #introduction request use MemberAuthentication
+        member_id = packet[offset:offset + 20]
+        offset = offset+20
+        global_time, = self._struct_Q.unpack_from(packet, offset)
+        self._global_time = global_time
+        print("global time is:" + str(global_time))
+        offset = offset + 8
+        #it is time to decode the payload
+        destination_ip, destination_port = self._struct_4SH.unpack_from(packet, offset)
+        destination_address = (inet_ntoa(destination_ip), destination_port)
+        print("destination address is:"+ str(destination_address))
+        offset += 6
+
+        source_lan_ip, source_lan_port = self._struct_4SH.unpack_from(packet, offset)
+        source_lan_address = (inet_ntoa(source_lan_ip), source_lan_port)
+        print("source_lan_address is: "+ str(source_lan_address))
+        offset += 6
+
+        source_wan_ip, source_wan_port = self._struct_4SH.unpack_from(packet, offset)
+        source_wan_address = (inet_ntoa(source_wan_ip), source_wan_port)
+        print("source_wan_address is: "+str(source_wan_address))
+        offset += 6
+
+        introduce_lan_ip, introduce_lan_port = self._struct_4SH.unpack_from(packet, offset)
+        lan_introduction_address = (inet_ntoa(introduce_lan_ip), introduce_lan_port)
+        print("lan_introduction_address is: "+str(lan_introduction_address))
+        offset += 6
+
+        introduce_wan_ip, introduce_wan_port = self._struct_4SH.unpack_from(packet, offset)
+        wan_introduction_address = (inet_ntoa(introduce_wan_ip), introduce_wan_port)
+        print("wan_introduction_address is:" +str(wan_introduction_address))
+        offset += 6
+
+        flags, identifier, = self._struct_BH.unpack_from(packet, offset)
+        offset += 3
+
+        connection_type = self._decode_connection_type_map.get(flags & int("11000000", 2))
+        print("connection type is: "+ str(connection_type))
+        if connection_type is None:
+            raise DropPacket("Invalid connection type flag")
+
+        tunnel = self._decode_tunnel_map.get(flags & int("100", 2))
+        print("tunnel is:" + str(tunnel))
+        if lan_introduction_address==("0.0.0.0",0) and wan_introduction_address ==("0.0.0.0",0):
+            print("it is an empty introduction response")
+
+        signiture = packet[offset:]
+        prefix = packet[0:offset]
+
+        message = Message.introduction_response()
+        message.destination_addr = destination_address
+        message.sender_lan_addr = source_lan_address
+        message.sender_wan_addr = source_wan_address
+        message.lan_introducted_addr=lan_introduction_address
+        message.wan_introducted_addr = wan_introduction_address
+        #message.lan_introduction_address = lan_introduction_address
+        #message.wan_introduction_address = wan_introduction_address
+        message.identifier = identifier
+        message.mid = member_id
+        message.global_time = global_time
+        message.signiture = signiture
+        message.prefix = self.prefix
+        message.packet = packet
+        return message
+
+    #this function is never called for now, but we may need it later for statistical information
+    def decode_missing_identity(self,packet):
+        offset = 23
+        #offset = placeholder.offset
+        #missing-identity message us NoAuthentication
+        key_length = 0
+        #it use PublicResoulution, so we need to do nothing
+        #it use directDitribution, we need to take out the global time
+        global_time = self._struct_Q.unpack_from(packet,offset)
+        print("the global time is: "+str(global_time[0]))
+        self._global_time = global_time[0]
+
+        message = Message.missing_identity()
+        message.packet = packet
+
+    def decode_puncture_request(self,packet):
+        #offset = placeholder.offset
+        offset = 23
+        #puncture-request uses NoAuthentication
+        #puncture-request uses DirectDistribution
+        global_time, = self._struct_Q.unpack_from(packet, offset)
+        print("global time is:" + str(global_time))
+        offset = offset + 8
+
+        if len(packet) < offset + 14:
+            print("the length is insufficient")
+
+        lan_walker_ip, lan_walker_port = self._struct_4SH.unpack_from(packet, offset)
+        lan_walker_address = (inet_ntoa(lan_walker_ip), lan_walker_port)
+        print("lan_walker_address is: "+ str(lan_walker_address))
+        offset += 6
+
+        wan_walker_ip, wan_walker_port = self._struct_4SH.unpack_from(packet, offset)
+        wan_walker_address = (inet_ntoa(wan_walker_ip), wan_walker_port)
+        print("wan_walker_address is: "+ str(wan_walker_address))
+        offset += 6
+
+        identifier, = self._struct_H.unpack_from(packet, offset)
+        offset += 2
+
+        signiture = packet[offset:]
+        prefix = packet[0:offset]
+
+        message = Message.puncture_request()
+
+        message.lan_walker_addr = lan_walker_address
+        message.wan_walker_addr = wan_walker_address
+        message.identifier = identifier
+        message.global_time = global_time
+        message.signiture = signiture
+        message.prefix = self.prefix
+        message.packet = packet
+        return message
+
+    def decode_puncture(self,packet):
         pass
 
 
 
+    #some untility functions listed below
+
+    #get a proper candidate to introduce
+    def get_candidate_to_introduce(self,candidate):
+        candidate_to_introduce = self.candidate_group.get_candidate_to_introduce(candidate)
+        return candidate_to_introduce
+    #get a proper candidate to walk
+    def get_candidate_to_walk(self):
+        candidate_to_walk = self.candidate_group.get_candidate_to_walk()
+        return candidate_to_walk
+
+
+    def get_lan_IP(self,addr):
+        #try to connect to tracker to determine the ip we used
+        #because a device may have multiple network interfaces (e.g. a Wifi and wire network while one of them
+        #is not connected to public network)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(addr)
+        sock_IP = s.getsockname()[0]
+        s.close()
+        return sock_IP
+
+    #@staticmethod
+    #def get_addr_from_string(address):
+            #convert a string to (IP,PORT) tuple
+        #addr = address.split(":")
+        #addr_tuple = (addr[0],addr[1])
+        #return addr_tuple
+
+        #get the majority votes
+    def get_majority_vote(self):
+        max_vote = 0
+        majority = self.wan_ip+":"+str(self.wan_port)
+        for key in self.WAN_VOTE:
+            num_vote = len(self.WAN_VOTE[key])
+            if num_vote>max_vote:
+                majority = key
+        majority_list = majority.split(":")
+        majority_IP = majority_list[0]
+        majority_PORT = int(majority_list[1])
+        return (majority_IP,majority_PORT)
+
+    #take a wan vote, possible to change the wan address basing on the votes
+    def wan_address_vote(self,address,candidate_addr):
+        assert isinstance(address,tuple),type(address)
+        assert isinstance(candidate_addr,tuple),type(candidate_addr)
+        #@param:addr my address which is perceived by the voter
+        #@param:candidate_addr the candidate's (voter) addr
+        change_flag = 0
+        IP = address[0]
+        PORT = address[1]
+        ADDR = IP+":"+str(PORT)
+        if ADDR in self.WAN_VOTE:
+            candidate_vote_list = self.WAN_VOTE[ADDR]
+            if candidate_addr not in candidate_vote_list:
+                self.WAN_VOTE[ADDR].append(candidate_addr)
+                change_flag = 1
+        else:
+            self.WAN_VOTE[ADDR] = [candidate_addr]
+            change_flag = 1
+        #if there is any update in WAN_VOTE
+        if (change_flag == 1):
+            new_WAN_ADDR = self.get_majority_vote()
+            self.wan_ip = new_WAN_ADDR[0]
+            self.wan_port=new_WAN_ADDR[1]
+            self.wan_addr = new_WAN_ADDR
 
     def get_netmask(self,address):
-        interfaces = Mywalker._get_interface_addresses()
+        interfaces = Walker._get_interface_addresses()
         for interface in interfaces:
             if(interface.address==address):
                 return interface.netmask
         return None
-
 
     @staticmethod
     def _get_interface_addresses():
@@ -680,19 +691,10 @@ class Mywalker:
         except OSError, e:
             #logger = logging.getLogger("dispersy")
             #logger.warning("failed to check network interfaces, error was: %r", e)
-            print "OSError"
-    def start(self):
-        self.loop_sender.start(5.0)
-        #self.loop_listener.start(0.1)
-        self._listening_thread.start()
-        reactor.run()
+            print ("OSError")
 
-
-
-if __name__=="__main__":
-    walker = Mywalker()
-    walker.start()
-    #interfaces = Mywalker._get_interface_addresses()
-    #for interface in interfaces:
-        #print interface.netmask
-    #print walker.LAN_NETMASK
+if __name__ == "__main__":
+    walker = Walker(port=25000)
+    #walker.transport.write("hahahahaha222233333",("8.8.8.8",8))
+    #walker.listening_port=walker.reactor.listenUDP(walker.lan_port, walker)
+    walker.reactor.run()
