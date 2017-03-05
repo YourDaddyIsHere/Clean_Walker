@@ -23,20 +23,35 @@ class WcandidateGroup:
 		tracker5 = Wcandidate((u"83.149.70.6"          , 6424),(u"83.149.70.6"          , 6424),"255,255.255.255")
 		tracker6 = Wcandidate((u"95.211.155.142"       , 6427),(u"95.211.155.142"       , 6427),"255,255.255.255")
 		tracker7 = Wcandidate((u"95.211.155.131"       , 6428),(u"95.211.155.131"       , 6428),"255,255.255.255")
+		tracker8 = Wcandidate((u"dispersy1.tribler.org", 6421),(u"dispersy1.tribler.org", 6421))
+		tracker9 = Wcandidate((u"dispersy2.tribler.org", 6422),(u"dispersy2.tribler.org", 6422))
+		tracker10 = Wcandidate((u"dispersy3.tribler.org", 6423),(u"dispersy3.tribler.org", 6423))
+		tracker11 = Wcandidate((u"dispersy4.tribler.org", 6424),(u"dispersy4.tribler.org", 6424))
+		tracker12 = Wcandidate((u"dispersy7.tribler.org", 6427),(u"dispersy7.tribler.org", 6427))
+		tracker13 = Wcandidate((u"dispersy8.tribler.org", 6428),(u"dispersy8.tribler.org", 6428))
 		
+		self.trusted_candidates.append(tracker)
 		self.trusted_candidates.append(tracker2)
 		self.trusted_candidates.append(tracker3)
 		self.trusted_candidates.append(tracker4)
 		self.trusted_candidates.append(tracker5)
+		self.trusted_candidates.append(tracker6)
+		self.trusted_candidates.append(tracker7)
+		self.trusted_candidates.append(tracker8)
+		self.trusted_candidates.append(tracker9)
+		self.trusted_candidates.append(tracker10)
+		self.trusted_candidates.append(tracker11)
+		self.trusted_candidates.append(tracker12)
+		self.trusted_candidates.append(tracker13)
 		print "the length of trusted list is:"
 		print len(self.trusted_candidates)
 
 	#check are all lists empty
-	def has_candidate(self):
-		if(len(self.trusted_candiates)==0 and len(self.walk_candidates)==0 and len(self.stumble_candidates)==0 and len(self.intro_candidates) ==0):
-			return False
-		else:
-			return True
+	#def has_candidate(self):
+		#if(len(self.trusted_candiates)==0 and len(self.walk_candidates)==0 and len(self.stumble_candidates)==0 and len(self.intro_candidates) ==0):
+			#return False
+		#else:
+			#return True
 	def choose_group(self):
 		#return one of the group basing on probability
 		#it is possible to return a empty list
@@ -98,6 +113,7 @@ class WcandidateGroup:
 
 	def get_candidate_to_walk(self):
 		#get the oldest candiate in the chosen group
+		self.clean_stale_candidates()
 		candidates_list =[]
 		list_type=""
 		#loop until we get a non-empty list
@@ -120,7 +136,7 @@ class WcandidateGroup:
 			candidates_list_sorted.reverse()
 			return candidates_list_sorted[0]
 		else:
-			print "this is before that None"
+			#print "this is before that None"
 			return None
 
 	def is_same_candidate(self,candidate1,candidate2):
@@ -132,6 +148,8 @@ class WcandidateGroup:
 			#print "they are different candidates"
 			#print [(candidate1.get_LAN_ADDR(),candidate1.get_WAN_ADDR()),(candidate2.get_LAN_ADDR(),candidate2.get_WAN_ADDR())]
 			return False
+	#check if the two address are in same NAT
+	#has some bugs, of no use for now.
 	def is_in_same_NAT(self,lan1,netmask1,lan2,netmask2):
 		cidr1 = str(netaddr.IPAddress(netmask1).netmask_bits())
 		network1 = netaddr.IPNetwork(lan1+"/"+cidr1)
