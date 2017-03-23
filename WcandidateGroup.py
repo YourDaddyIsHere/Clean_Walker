@@ -3,18 +3,29 @@ import time
 from Wcandidate import Wcandidate
 import netaddr
 class WcandidateGroup:
-	WALK_LIMIT=57.5
-	STUMBLE_LIMIT=57.5
-	INTRO_LIMIT = 27.5
-	all_candidates = []
-	trusted_candidates = [] #0.5% probability, this list should never be empty, should contain at least one tracker
-	walk_candidates = [] #49.75% probability
-	stumble_candidates = [] #24.825%probability
-	intro_candidates= [] #24.825%probability
-	introduce_flag = 0;#even numbers indicate walk_candidates, odd numbers indicate stumble_candidates
-	walk_index =0; #the walk_candidates that should be introduced.
-	stumble_index=0 # the stumble_candidates that should be introduced
+	#WALK_LIMIT=57.5
+	#STUMBLE_LIMIT=57.5
+	#INTRO_LIMIT = 27.5
+	#all_candidates = []
+	#trusted_candidates = [] #0.5% probability, this list should never be empty, should contain at least one tracker
+	#walk_candidates = [] #49.75% probability
+	#stumble_candidates = [] #24.825%probability
+	#intro_candidates= [] #24.825%probability
+	#introduce_flag = 0;#even numbers indicate walk_candidates, odd numbers indicate stumble_candidates
+	#walk_index =0; #the walk_candidates that should be introduced.
+	#stumble_index=0 # the stumble_candidates that should be introduced
 	def __init__(self):
+		self.WALK_LIMIT=57.5
+		self.STUMBLE_LIMIT=57.5
+		self.INTRO_LIMIT = 27.5
+		self.all_candidates = []
+		self.trusted_candidates = [] #0.5% probability, this list should never be empty, should contain at least one tracker
+		self.walk_candidates = [] #49.75% probability
+		self.stumble_candidates = [] #24.825%probability
+		self.intro_candidates= [] #24.825%probability
+		self.introduce_flag = 0;#even numbers indicate walk_candidates, odd numbers indicate stumble_candidates
+		self.walk_index =0; #the walk_candidates that should be introduced.
+		self.stumble_index=0 # the stumble_candidates that should be introduced
 		print "initializing trusted_list"
 		tracker = Wcandidate(("127.0.0.1",1235),("127.0.0.1",1235),"255,255.255.255")
 		tracker2 = Wcandidate((u"130.161.119.206"      , 6421),(u"130.161.119.206"      , 6421),"255,255.255.255")
@@ -150,22 +161,24 @@ class WcandidateGroup:
 			return False
 	#check if the two address are in same NAT
 	#has some bugs, of no use for now.
-	def is_in_same_NAT(self,lan1,netmask1,lan2,netmask2):
-		cidr1 = str(netaddr.IPAddress(netmask1).netmask_bits())
-		network1 = netaddr.IPNetwork(lan1+"/"+cidr1)
-		cidr2 = str(netaddr.IPAddress(netmask2).netmask_bits())
-		network2 = netaddr.IPNetwork(lan2+"/"+cidr2)
-		network1_networkid = str(network1.network)
-		network2_networkid = str(network2.network)
-		if(network1_networkid==network2_networkid):
-			return True
-		else:
-			return False
+#	def is_in_same_NAT(self,lan1,netmask1,lan2,netmask2):
+#		cidr1 = str(netaddr.IPAddress(netmask1).netmask_bits())
+#		network1 = netaddr.IPNetwork(lan1+"/"+cidr1)
+#		cidr2 = str(netaddr.IPAddress(netmask2).netmask_bits())
+#		network2 = netaddr.IPNetwork(lan2+"/"+cidr2)
+#		network1_networkid = str(network1.network)
+#		network2_networkid = str(network2.network)
+#		if(network1_networkid==network2_networkid):
+#			return True
+#		else:
+#			return False
 
 	#return None if there is no proper candidate
 	def get_candidate_to_introduce(self,candidate):
 		self.clean_stale_candidates()
 		if(self.introduce_flag%2==0 and len(self.walk_candidates)!=0):
+			if(len(self.walk_candidates)<=self.walk_index):
+				self.walk_index=max(0,len(self.walk_candidates)-1)
 			print "checking walk list"
 			self.introduce_flag = self.introduce_flag+1
 			i=0
@@ -183,6 +196,8 @@ class WcandidateGroup:
 			return None
 		self.introduce_flag = self.introduce_flag+1
 		if(self.introduce_flag%2==1 and len(self.stumble_candidates)!=0):
+			if(len(self.stumble_candidates)<=self.stumble_index):
+				self.stumble_index=max(0,len(self.stumble_candidates)-1)
 			print "checking stumble list"
 			self.introduce_flag = self.introduce_flag+1
 			i=0
@@ -199,24 +214,38 @@ class WcandidateGroup:
 			return None
 	def clean_stale_candidates(self):
 		now = time.time()
+		walk_candidates_to_remove=[]
 		for candidate in self.walk_candidates:
 			if(now-(candidate.last_walk_time)>self.WALK_LIMIT):
-				self.walk_candidates.remove(candidate)
+				print "cleaning a time out walk candidate........"+str(candidate.LAN_ADDR)
+				#self.walk_candidates.remove(candidate)
+				walk_candidates_to_remove.append(candidate)
 				#self.all_candidates.remove(candidate)
 				if(len(self.walk_candidates)!=0):
 					self.walk_index = self.walk_index%len(self.walk_candidates)
 				else:
 					self.walk_index = 0;
+		self.walk_candidates =[x for x in self.walk_candidates if x not in walk_candidates_to_remove]
+		stumble_candidates_to_remove =[]
 		for candidate in self.stumble_candidates:
 			if(now-(candidate.last_stumble_time)>self.STUMBLE_LIMIT):
-				self.stumble_candidates.remove(candidate)
+				print "cleaning a time out stumble candidate........"+str(candidate.LAN_ADDR)
+				#self.stumble_candidates.remove(candidate)
+				stumble_candidates_to_remove.append(candidate)
 				#self.all_candidates.remove(candidate)
 				if(len(self.stumble_candidates)!=0):
 					self.stumble_index = self.stumble_index%len(self.stumble_candidates)
+					#print "stumble index is now: "+str(self.stumble_index)
 				else:
+					#print "stumble index is now: "+str(self.stumble_index)
 					self.stumble_index = 0
+				continue
+		self.stumble_candidates = [x for x in self.stumble_candidates if x not in stumble_candidates_to_remove]
+		intro_candidates_to_remove =[]
 		for candidate in self.intro_candidates:
 			if(now-(candidate.last_intro_time)>self.INTRO_LIMIT):
-				self.intro_candidates.remove(candidate)
+				#self.intro_candidates.remove(candidate)
+				intro_candidates_to_remove.append(candidate)
 				#self.all_candidates.remove(candidate)
+		self.intro_candidates = [x for x in self.intro_candidates if x not in intro_candidates_to_remove]
 

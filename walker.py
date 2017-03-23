@@ -31,7 +31,7 @@ logger.setLevel(logging.DEBUG)
 #functions like decode_xxxx is the decoder of a specific message type, which convert binary string to certain message instances.
 class Walker(DatagramProtocol):
 
-    def __init__(self,port = 25000):
+    def __init__(self,port = 25000,is_tracker=False):
         #super(Walker, self).__init__():
         #tracker_ADDR is reserved for convenience of testing
         #self.tracker_ADDR = [
@@ -43,7 +43,7 @@ class Walker(DatagramProtocol):
         #(u"95.211.155.142"       , 6427),
         #(u"95.211.155.131"       , 6428),
         #]
-
+        self.is_tracker=is_tracker
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         #get the network interface which connected to public Internet (8.8.8.8,8) is the root DNS server
         #so that the network interface connected to it is guranteed to be connected to public Internet
@@ -114,13 +114,6 @@ class Walker(DatagramProtocol):
         self.my_key = self.crypto.generate_key(u"medium")
         self.my_mid = self.crypto.key_to_hash(self.my_key.pub())
         self.my_public_key = self.crypto.key_to_bin(self.my_key.pub())
-        #print len(self.my_mid)
-        #get my lan_IP
-        #self.lan_ip = self.get_lan_IP()
-        #self.lan_port = 32000
-        #self.lan_addr = (self.lan_ip,self.lan_port)
-        #print self.lan_addr
-        #this is similar to the container in conversion.encode_message()
         self.container = [self.prefix,chr(246)]
         self.reactor = reactor
         self.listening_port=self.reactor.listenUDP(self.lan_port, self)
@@ -128,9 +121,9 @@ class Walker(DatagramProtocol):
 
     def startProtocol(self):
         print("protocol started")
-
-        loop = task.LoopingCall(self.take_step)
-        loop.start(5.0)
+        if(self.is_tracker==False):
+            loop = task.LoopingCall(self.take_step)
+            loop.start(5.0)
 
     #take one step
     def take_step(self):
@@ -163,24 +156,11 @@ class Walker(DatagramProtocol):
         now = self._struct_Q.pack(self._global_time)
         container.append(now)
         container.extend(data)
-        #print container
         packet = "".join(container)
-        #print ("the packet length is: "+str(len(packet)))
         signiture = self.crypto.create_signature(self.my_key, packet)
-        #print ("the signiture length is: "+str(len(signiture)))
         packet = packet + signiture
-        #print repr(signiture)
-        message = Message.introduction_request()
-        message.destination_addr = destination_address
-        message.sender_lan_addr = source_lan_address
-        message.sender_wan_addr = source_wan_address
-        message.identifier = identifier
-        message.mid = self.my_mid
-        message.global_time = now
-        message.signiture = signiture
-        message.message_type = 246
-        message.prefix = self.prefix
-        message.packet = packet
+        message=Message.message(destination_address=destination_address,source_lan_address=source_lan_address,source_wan_address=source_wan_address,identifier=identifier,
+                                mid=self.mid,global_time=now,signiture=signiture,message_type=246,prefix=self.prefix,packet=packet)
         return message
     def create_introduction_response(self,identifier,destination_address,source_lan_address,source_wan_address,lan_introduction_address,wan_introduction_address):
         data = (inet_aton(destination_address[0]), self._struct_H.pack(destination_address[1]),
@@ -198,24 +178,15 @@ class Walker(DatagramProtocol):
         packet = "".join(container)
         signiture = self.crypto.create_signature(self.my_key, packet)
         packet = packet + signiture
-        message = Message.introduction_response()
-        message.destination_addr = destination_address
-        message.sender_lan_addr = source_lan_address
-        message.sender_wan_addr = source_wan_address
-        message.lan_introducted_addr = lan_introduction_address
-        message.wan_introducted_addr = wan_introduction_address
-        message.identifier = identifier
-        message.mid = self.my_mid
-        message.global_time = now
-        message.signiture = signiture
-        message.message_type = 246
-        message.prefix = self.prefix
-        message.packet = packet
+
+
+        message = Message.message(destination_address=destination_address,source_lan_address=source_lan_address,source_wan_address=source_wan_address,lan_introduction_address=lan_introduction_address,
+                                  wan_introduction_address=wan_introduction_address,identifier=identifier,mid=self.mid,global_time=now,signiture=signiture,message_type=245,prefix=self.prefix,packet=packet)
         return message
-    def create_puncture_request(self,lan_walker_addr,wan_walker_addr):
+    def create_puncture_request(self,lan_walker_address,wan_walker_address):
         identifier = int(random() * 2 ** 16)
-        data = (inet_aton(lan_walker_addr[0]), self._struct_H.pack(lan_walker_addr[1]),
-                inet_aton(wan_walker_addr[0]), self._struct_H.pack(wan_walker_addr[1]),
+        data = (inet_aton(lan_walker_address[0]), self._struct_H.pack(lan_walker_address[1]),
+                inet_aton(wan_walker_address[0]), self._struct_H.pack(wan_walker_address[1]),
                 self._struct_H.pack(identifier))
         container = [self.prefix,chr(250)]
         #my_public_key = self.my_public_key
@@ -227,17 +198,10 @@ class Walker(DatagramProtocol):
         #since it uses NoAuthentication, the signiture is ""
         signiture =""
         packet = packet+signiture
-        message = Message.puncture_request()
-        message.lan_walker_addr = lan_walker_addr
-        message.wan_walker_addr = wan_walker_addr
-        message.identifier = identifier
-        message.mid = self.my_mid
-        message.global_time = now
-        message.signiture = signiture
-        message.message_type = 250
-        message.prefix = self.prefix
-        message.packet = packet
+        message=Message.message(lan_walker_address=lan_walker_address,wan_walker_address=wan_walker_address,identifier=identifier,mid=self.mid,global_time=now,
+                                signiture=signiture,message_type=250,prefix=self.prefix,packet=packet)
         return message
+
     def create_puncture(self,identifier,source_lan_address,source_wan_address):
         #the identifier of dispersy-puncture should be same to corresponding puncture-request
         #but since this is only an experiment, so be it...
@@ -246,7 +210,6 @@ class Walker(DatagramProtocol):
         data = (inet_aton(source_lan_address[0]), self._struct_H.pack(source_lan_address[1]),
                 inet_aton(source_wan_address[0]), self._struct_H.pack(source_wan_address[1]),
                 self._struct_H.pack(identifier))
-        container = [self.prefix,chr(250)]
         container = [self.prefix,chr(249)]
         container.append(self.my_mid)
         now = self._struct_Q.pack(self._global_time)
@@ -255,30 +218,15 @@ class Walker(DatagramProtocol):
         packet = "".join(container)
         signiture = self.crypto.create_signature(self.my_key, packet)
         packet = packet + signiture
-        message = Message.puncture()
-        message.sender_lan_addr = source_lan_address
-        message.sender_wan_addr = source_wan_address
-        message.identifier = identifier
-        message.mid = self.my_mid
-        message.global_time = now
-        message.signiture = signiture
-        message.message_type = 250
-        message.prefix = self.prefix
-        message.packet = packet
+        message = Message.message(source_lan_address=source_lan_address,source_wan_address=source_wan_address,identifier=identifier,
+                                  mid=self.mid,global_time=now,signiture=signiture,message_type=249,prefix=self.prefix,packet=packet)
         return message
 
     def create_identity(self):
         identifier = int(random() * 2 ** 16)
         container = [self.prefix,chr(248)]
-        #container.append(self.my_mid)
-        #for dispersy-identity, it always uses "bin" as encoding
-        #regardless of community-version
         my_public_key = self.my_public_key
         container.extend((self._struct_H.pack(len(my_public_key)), my_public_key))
-        #now = int(time())
-        #global_time = (self._global_time,0)
-        #print "global time tuple is: "+str(global_time)
-        #print type(global_time)
         now = self._struct_Q.pack(self._global_time)
         container.append(now)
         data=()
@@ -287,24 +235,14 @@ class Walker(DatagramProtocol):
         packet = "".join(container)
         signiture = self.crypto.create_signature(self.my_key, packet)
         packet = packet+signiture
-        message = Message.identity()
-        message.identifier = identifier
-        message.mid = self.my_mid
-        message.global_time = now
-        message.signiture = signiture
-        message.message_type = 248
-        message.prefix = self.prefix
-        message.packet = packet
-        message.packet = packet
+        message=Message.message(identifier=identifier,mid=self.mid,global_time=now,signiture=signiture,message_type=248,prefix=self.prefix,packet=packet)
         return message
-
 
 
     def datagramReceived(self, data, addr):
         print("received %r from %s" % (data, addr))
         #now we receive a UDP datagram, call decode_message to decode it
         self.decode_message(data,addr)
-        #self.transport.write(data, addr)
 
     def decode_message(self,packet,addr):
         message_id = ord(packet[22])
@@ -333,12 +271,12 @@ class Walker(DatagramProtocol):
     def on_introduction_request(self,packet,addr):
         #placeholder = PlaceHolder(23)
         message_request = self.decode_introduction_request(packet)
-        stumble_candidate = Wcandidate(message_request.sender_lan_addr,addr)
+        stumble_candidate = Wcandidate(message_request.source_lan_address,addr)
         self.candidate_group.add_candidate_to_stumble_list(stumble_candidate)
         #do wan_vote
-        self.wan_address_vote(message_request.destination_addr,addr)
+        self.wan_address_vote(message_request.destination_address,addr)
         #we don't have codes to determine whether the candidate is within our lan, so we use wan address.
-        candidate_request = Wcandidate(message_request.sender_lan_addr,message_request.sender_wan_addr)
+        candidate_request = Wcandidate(message_request.source_lan_address,message_request.source_wan_address)
         candidate_to_introduce = self.candidate_group.get_candidate_to_introduce(candidate_request)
         if candidate_to_introduce!=None:
             introduced_lan_addr = candidate_to_introduce.get_LAN_ADDR()
@@ -349,26 +287,26 @@ class Walker(DatagramProtocol):
         message_response = self.create_introduction_response(message_request.identifier,addr,self.lan_addr,self.lan_addr,introduced_lan_addr,introduced_wan_addr)
         #now it is time to create puncture request
         if candidate_to_introduce!=None:
-            message_puncture_request = self.create_puncture_request(message_request.sender_lan_addr,message_request.sender_lan_addr)
+            message_puncture_request = self.create_puncture_request(message_request.source_lan_address,message_request.source_lan_address)
             self.transport.write(message_puncture_request.packet,candidate_to_introduce.get_WAN_ADDR())
             self.transport.write(message_puncture_request.packet,candidate_to_introduce.get_LAN_ADDR())
         self.transport.write(message_response.packet,addr)
     def on_introduction_response(self,packet,addr):
         #placeholder = PlaceHolder(23)
         message = self.decode_introduction_response(packet)
-        self.wan_address_vote(message.destination_addr,addr)
-        walk_candidate=Wcandidate(message.sender_lan_addr,addr)
+        self.wan_address_vote(message.destination_address,addr)
+        walk_candidate=Wcandidate(message.source_lan_address,addr)
         self.candidate_group.add_candidate_to_walk_list(walk_candidate)
-        print("the introduced candidate is: "+ str(message.wan_introducted_addr))
-        if message.lan_introducted_addr!=("0.0.0.0",0) and message.wan_introducted_addr!=("0.0.0.0",0):
-            introduced_candidate = Wcandidate(message.lan_introducted_addr,message.wan_introducted_addr)
+        print("the introduced candidate is: "+ str(message.wan_introduction_address))
+        if message.lan_introduction_address!=("0.0.0.0",0) and message.wan_introduction_address!=("0.0.0.0",0):
+            introduced_candidate = Wcandidate(message.lan_introduction_address,message.wan_introduction_address)
             self.candidate_group.add_candidate_to_intro_list(introduced_candidate)
             print("new candidate has been added to intro list")
     def on_puncture_request(self,packet,addr):
         #placeholder = PlaceHolder(23)
         message_puncture_request = self.decode_puncture_request(packet)
-        lan_walker_address = message_puncture_request.lan_walker_addr
-        wan_walker_address = message_puncture_request.wan_walker_addr
+        lan_walker_address = message_puncture_request.lan_walker_address
+        wan_walker_address = message_puncture_request.wan_walker_address
         self.wan_addr = self.get_majority_vote()
         print("the wan addr from majority vote is:")
         print(self.wan_addr)
@@ -376,13 +314,13 @@ class Walker(DatagramProtocol):
         self.transport.write(message_puncture.packet,lan_walker_address)
         self.transport.write(message_puncture.packet,wan_walker_address)
 
-    def on_puncture(self,packet):
-        pass
+    #def on_puncture(self,packet):
+        #pass
     def on_missing_identity(self,packet,addr):
         message = self.create_identity()
         self.transport.write(message.packet,addr)
-    def on_identity(self,packet):
-        pass
+    #def on_identity(self,packet):
+        #pass
 
     #a bunch of message decoder below:
     def decode_introduction_request(self,packet):
@@ -424,16 +362,10 @@ class Walker(DatagramProtocol):
         signiture = packet[offset:]
         prefix = packet[0:offset]
 
-        message = Message.introduction_request()
-        message.destination_addr = destination_address
-        message.sender_lan_addr = source_lan_address
-        message.sender_wan_addr = source_wan_address
-        message.identifier = identifier
-        message.mid = member_id
-        message.global_time = global_time
-        message.signiture = signiture
-        message.prefix = self.prefix
-        message.packet = packet
+
+
+        message=Message.message(message_type=246,destination_address=destination_address,source_lan_address=source_lan_address,source_wan_address=source_wan_address,identifier=identifier,
+                                mid=self.mid,global_time=global_time,signiture=signiture,prefix=prefix,packet=packet)
         return message
 
 
@@ -489,20 +421,10 @@ class Walker(DatagramProtocol):
         signiture = packet[offset:]
         prefix = packet[0:offset]
 
-        message = Message.introduction_response()
-        message.destination_addr = destination_address
-        message.sender_lan_addr = source_lan_address
-        message.sender_wan_addr = source_wan_address
-        message.lan_introducted_addr=lan_introduction_address
-        message.wan_introducted_addr = wan_introduction_address
-        #message.lan_introduction_address = lan_introduction_address
-        #message.wan_introduction_address = wan_introduction_address
-        message.identifier = identifier
-        message.mid = member_id
-        message.global_time = global_time
-        message.signiture = signiture
-        message.prefix = self.prefix
-        message.packet = packet
+
+
+        message=Message.message(message_type=245,destination_address=destination_address,source_lan_address=source_lan_address,source_wan_address=source_wan_address,lan_introduction_address=lan_introduction_address,
+                                wan_introduction_address=wan_introduction_address,identifier=identifier,mid=member_id,global_time=global_time,signiture=signiture,prefix=self.prefix,packet=packet)
         return message
 
     #this function is never called for now, but we may need it later for statistical information
@@ -517,8 +439,9 @@ class Walker(DatagramProtocol):
         print("the global time is: "+str(global_time[0]))
         self._global_time = global_time[0]
 
-        message = Message.missing_identity()
-        message.packet = packet
+        #message = Message.missing_identity()
+        #message.packet = packet
+        message=Message.message(message_type=247,packet=packet)
 
     def decode_puncture_request(self,packet):
         #offset = placeholder.offset
@@ -548,15 +471,10 @@ class Walker(DatagramProtocol):
         signiture = packet[offset:]
         prefix = packet[0:offset]
 
-        message = Message.puncture_request()
 
-        message.lan_walker_addr = lan_walker_address
-        message.wan_walker_addr = wan_walker_address
-        message.identifier = identifier
-        message.global_time = global_time
-        message.signiture = signiture
-        message.prefix = self.prefix
-        message.packet = packet
+
+        message=Message.message(message_type=250,lan_walker_address=lan_walker_address,wan_walker_address=wan_walker_address,identifier=identifier,
+                                global_time=global_time,signiture=signiture,prefix=self.prefix,packet=packet)
         return message
 
     def decode_puncture(self,packet):
@@ -586,12 +504,7 @@ class Walker(DatagramProtocol):
         s.close()
         return sock_IP
 
-    #@staticmethod
-    #def get_addr_from_string(address):
-            #convert a string to (IP,PORT) tuple
-        #addr = address.split(":")
-        #addr_tuple = (addr[0],addr[1])
-        #return addr_tuple
+
 
         #get the majority votes
     def get_majority_vote(self):
@@ -637,6 +550,8 @@ class Walker(DatagramProtocol):
             if(interface.address==address):
                 return interface.netmask
         return None
+    def run(self):
+        self.reactor.run()
 
     @staticmethod
     def _get_interface_addresses():
@@ -695,6 +610,4 @@ class Walker(DatagramProtocol):
 
 if __name__ == "__main__":
     walker = Walker(port=25000)
-    #walker.transport.write("hahahahaha222233333",("8.8.8.8",8))
-    #walker.listening_port=walker.reactor.listenUDP(walker.lan_port, walker)
-    walker.reactor.run()
+    walker.run()

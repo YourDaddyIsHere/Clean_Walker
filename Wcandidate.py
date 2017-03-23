@@ -21,15 +21,15 @@ class Wcandidate:
 		self.NETMASK = netmask
 
 
-	def get_LAN_IP(self):
-		LAN_IP = socket.gethostbyname(self.LAN_ADDR[0])
-		return self.LAN_IP[0]
-	def get_LAN_PORT(self):
-		return (self.get_LAN_IP(),self.get_LAN_PORT())
+#	def get_LAN_IP(self):
+#		LAN_IP = socket.gethostbyname(self.LAN_ADDR[0])
+#		return self.LAN_IP[0]
+#	def get_LAN_PORT(self):
+#		return (self.get_LAN_IP(),self.get_LAN_PORT())
 	def get_LAN_ADDR(self):
 		return self.LAN_ADDR
-	def get_NETMASK(self):
-		return self.NETMASK
+#	def get_NETMASK(self):
+#		return self.NETMASK
 	def get_WAN_IP(self):
 		WAN_IP = socket.gethostbyname(self.WAN_ADDR[0])
 		return WAN_IP
