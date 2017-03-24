@@ -32,17 +32,6 @@ logger.setLevel(logging.DEBUG)
 class Walker(DatagramProtocol):
 
     def __init__(self,port = 25000,is_tracker=False):
-        #super(Walker, self).__init__():
-        #tracker_ADDR is reserved for convenience of testing
-        #self.tracker_ADDR = [
-        #(u"127.0.0.1"     ,1235),
-        #(u"130.161.119.206"      , 6421),
-        #(u"130.161.119.206"      , 6422),
-        #(u"131.180.27.155"       , 6423),
-        #(u"83.149.70.6"          , 6424),
-        #(u"95.211.155.142"       , 6427),
-        #(u"95.211.155.131"       , 6428),
-        #]
         self.is_tracker=is_tracker
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         #get the network interface which connected to public Internet (8.8.8.8,8) is the root DNS server
@@ -55,14 +44,9 @@ class Walker(DatagramProtocol):
         self.wan_ip = "0.0.0.0"
         self.wan_port =0
         self.wan_addr = ("0.0.0.0",0)
-        #self.sock.bind(self.lan_addr)
-
-        #indicates the current wan IP vote contains only 0.0.0.0 and the voter is nothing (empty list)
-        #self.WAN_VOTE = {"0.0.0.0:0":[]}
         self.WAN_VOTE = dict()
         self.candidate_group =WcandidateGroup()
         self._global_time=1
-
         self._struct_B = Struct(">B")
         self._struct_BBH = Struct(">BBH")
         self._struct_BH = Struct(">BH")
@@ -75,10 +59,8 @@ class Walker(DatagramProtocol):
         self._struct_QQHHBH = Struct(">QQHHBH")
         self._struct_ccB = Struct(">ccB")
         self._struct_4SH = Struct(">4sH")
-    #(u"dispersy4.st.tudelft.nl", 6424),
         self._encode_message_map = dict()  # message.name : EncodeFunctions
         self._decode_message_map = dict()  # byte : DecodeFunctions
-
         # the dispersy-introduction-request and dispersy-introduction-response have several bitfield
         # flags that must be set correctly
         # reserve 1st bit for enable/disable advice
@@ -105,11 +87,8 @@ class Walker(DatagramProtocol):
         self.ec = self.crypto.generate_key(u"medium")
         self.key = self.crypto.key_from_public_bin(self.master_key_hex)
         self.mid = self.crypto.key_to_hash(self.key.pub())
-        #the dispersy vesion and community version of multichain community version of multichain community in the tracker
         self.dispersy_version = "\x00"
         self.community_version = "\x01"
-        #print ord(self.community_version)
-        #create my key in multichain community, and convert it to mid for signiture use
         self.prefix = self.dispersy_version+self.community_version+self.mid
         self.my_key = self.crypto.generate_key(u"medium")
         self.my_mid = self.crypto.key_to_hash(self.my_key.pub())
@@ -128,15 +107,9 @@ class Walker(DatagramProtocol):
     #take one step
     def take_step(self):
         candidate_to_walk = self.get_candidate_to_walk()
-        #print candidate_to_walk
         candidate_to_walk_ADDR = candidate_to_walk.get_WAN_ADDR()
-        #message_puncture_request = self.create_puncture_request(("8.8.8.8",8),("8.8.8.8",8))
         message_introduction_request = self.create_introduction_request(candidate_to_walk_ADDR,self.lan_addr,self.lan_addr)
-        #message_puncture_request = self.create_puncture_request(("8.8.8.8",8),("8.8.8.8",8))
-
-        #self.sock.sendto(message_introduction_request.packet,candidate_to_walk_ADDR)
         self.transport.write(message_introduction_request.packet,candidate_to_walk_ADDR)
-        #self.transport.write(message_puncture_request.packet,candidate_to_walk_ADDR)
         logger.info("take step to: "+str(candidate_to_walk_ADDR))
 
     #a bunch of message creator
@@ -148,11 +121,8 @@ class Walker(DatagramProtocol):
                 self._struct_B.pack(self._encode_advice_map[True] | self._encode_connection_type_map[u"unknown"] | self._encode_sync_map[False]),
                 self._struct_H.pack(identifier)]
         container = [self.prefix,chr(246)]
-        #container.append(self.my_mid)
         my_public_key = self.my_public_key
-        #container.extend((self._struct_H.pack(len(my_public_key)), my_public_key))
         container.append(self.my_mid)
-        #now = int(time())
         now = self._struct_Q.pack(self._global_time)
         container.append(now)
         container.extend(data)
@@ -178,8 +148,6 @@ class Walker(DatagramProtocol):
         packet = "".join(container)
         signiture = self.crypto.create_signature(self.my_key, packet)
         packet = packet + signiture
-
-
         message = Message.message(destination_address=destination_address,source_lan_address=source_lan_address,source_wan_address=source_wan_address,lan_introduction_address=lan_introduction_address,
                                   wan_introduction_address=wan_introduction_address,identifier=identifier,mid=self.mid,global_time=now,signiture=signiture,message_type=245,prefix=self.prefix,packet=packet)
         return message
@@ -237,7 +205,6 @@ class Walker(DatagramProtocol):
         packet = packet+signiture
         message=Message.message(identifier=identifier,mid=self.mid,global_time=now,signiture=signiture,message_type=248,prefix=self.prefix,packet=packet)
         return message
-
 
     def datagramReceived(self, data, addr):
         print("received %r from %s" % (data, addr))
@@ -361,13 +328,9 @@ class Walker(DatagramProtocol):
 
         signiture = packet[offset:]
         prefix = packet[0:offset]
-
-
-
         message=Message.message(message_type=246,destination_address=destination_address,source_lan_address=source_lan_address,source_wan_address=source_wan_address,identifier=identifier,
                                 mid=self.mid,global_time=global_time,signiture=signiture,prefix=prefix,packet=packet)
         return message
-
 
     def decode_introduction_response(self,packet):
         #offset = placeholder.offset
@@ -420,9 +383,6 @@ class Walker(DatagramProtocol):
 
         signiture = packet[offset:]
         prefix = packet[0:offset]
-
-
-
         message=Message.message(message_type=245,destination_address=destination_address,source_lan_address=source_lan_address,source_wan_address=source_wan_address,lan_introduction_address=lan_introduction_address,
                                 wan_introduction_address=wan_introduction_address,identifier=identifier,mid=member_id,global_time=global_time,signiture=signiture,prefix=self.prefix,packet=packet)
         return message
@@ -433,14 +393,11 @@ class Walker(DatagramProtocol):
         #offset = placeholder.offset
         #missing-identity message us NoAuthentication
         key_length = 0
-        #it use PublicResoulution, so we need to do nothing
-        #it use directDitribution, we need to take out the global time
+        #it uses PublicResoulution, so we need to do nothing
+        #it uses directDitribution, we need to take out the global time
         global_time = self._struct_Q.unpack_from(packet,offset)
         print("the global time is: "+str(global_time[0]))
         self._global_time = global_time[0]
-
-        #message = Message.missing_identity()
-        #message.packet = packet
         message=Message.message(message_type=247,packet=packet)
 
     def decode_puncture_request(self,packet):
@@ -477,13 +434,6 @@ class Walker(DatagramProtocol):
                                 global_time=global_time,signiture=signiture,prefix=self.prefix,packet=packet)
         return message
 
-    def decode_puncture(self,packet):
-        pass
-
-
-
-    #some untility functions listed below
-
     #get a proper candidate to introduce
     def get_candidate_to_introduce(self,candidate):
         candidate_to_introduce = self.candidate_group.get_candidate_to_introduce(candidate)
@@ -496,15 +446,13 @@ class Walker(DatagramProtocol):
 
     def get_lan_IP(self,addr):
         #try to connect to tracker to determine the ip we used
-        #because a device may have multiple network interfaces (e.g. a Wifi and wire network while one of them
+        #because a device may have multiple network interfaces (e.g. a Wifi and wire network while some of them
         #is not connected to public network)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(addr)
         sock_IP = s.getsockname()[0]
         s.close()
         return sock_IP
-
-
 
         #get the majority votes
     def get_majority_vote(self):
@@ -604,8 +552,6 @@ class Walker(DatagramProtocol):
                             # trying to unpack _l_netmask
                             pass
         except OSError, e:
-            #logger = logging.getLogger("dispersy")
-            #logger.warning("failed to check network interfaces, error was: %r", e)
             print ("OSError")
 
 if __name__ == "__main__":

@@ -3,17 +3,7 @@ import time
 from Wcandidate import Wcandidate
 import netaddr
 class WcandidateGroup:
-	#WALK_LIMIT=57.5
-	#STUMBLE_LIMIT=57.5
-	#INTRO_LIMIT = 27.5
-	#all_candidates = []
-	#trusted_candidates = [] #0.5% probability, this list should never be empty, should contain at least one tracker
-	#walk_candidates = [] #49.75% probability
-	#stumble_candidates = [] #24.825%probability
-	#intro_candidates= [] #24.825%probability
-	#introduce_flag = 0;#even numbers indicate walk_candidates, odd numbers indicate stumble_candidates
-	#walk_index =0; #the walk_candidates that should be introduced.
-	#stumble_index=0 # the stumble_candidates that should be introduced
+
 	def __init__(self):
 		self.WALK_LIMIT=57.5
 		self.STUMBLE_LIMIT=57.5
@@ -57,7 +47,7 @@ class WcandidateGroup:
 		print "the length of trusted list is:"
 		print len(self.trusted_candidates)
 
-	#check are all lists empty
+	#check whether are all lists empty
 	#def has_candidate(self):
 		#if(len(self.trusted_candiates)==0 and len(self.walk_candidates)==0 and len(self.stumble_candidates)==0 and len(self.intro_candidates) ==0):
 			#return False
@@ -66,7 +56,6 @@ class WcandidateGroup:
 	def choose_group(self):
 		#return one of the group basing on probability
 		#it is possible to return a empty list
-		#@return(type,list)
 		if(len(self.walk_candidates)==0 and len(self.stumble_candidates)==0 and len(self.intro_candidates)==0):
 			return ("trusted",self.trusted_candidates)
 		num_random = random.random()*1000
@@ -152,12 +141,8 @@ class WcandidateGroup:
 
 	def is_same_candidate(self,candidate1,candidate2):
 		if(candidate1.get_LAN_ADDR()==candidate2.get_LAN_ADDR() and candidate1.get_WAN_ADDR()==candidate2.get_WAN_ADDR()):
-			#print "they are same candidates"
-			#print [(candidate1.get_LAN_ADDR(),candidate1.get_WAN_ADDR()),(candidate2.get_LAN_ADDR(),candidate2.get_WAN_ADDR())]
 			return True
 		else:
-			#print "they are different candidates"
-			#print [(candidate1.get_LAN_ADDR(),candidate1.get_WAN_ADDR()),(candidate2.get_LAN_ADDR(),candidate2.get_WAN_ADDR())]
 			return False
 	#check if the two address are in same NAT
 	#has some bugs, of no use for now.
@@ -218,9 +203,7 @@ class WcandidateGroup:
 		for candidate in self.walk_candidates:
 			if(now-(candidate.last_walk_time)>self.WALK_LIMIT):
 				print "cleaning a time out walk candidate........"+str(candidate.LAN_ADDR)
-				#self.walk_candidates.remove(candidate)
 				walk_candidates_to_remove.append(candidate)
-				#self.all_candidates.remove(candidate)
 				if(len(self.walk_candidates)!=0):
 					self.walk_index = self.walk_index%len(self.walk_candidates)
 				else:
@@ -230,22 +213,16 @@ class WcandidateGroup:
 		for candidate in self.stumble_candidates:
 			if(now-(candidate.last_stumble_time)>self.STUMBLE_LIMIT):
 				print "cleaning a time out stumble candidate........"+str(candidate.LAN_ADDR)
-				#self.stumble_candidates.remove(candidate)
 				stumble_candidates_to_remove.append(candidate)
-				#self.all_candidates.remove(candidate)
 				if(len(self.stumble_candidates)!=0):
 					self.stumble_index = self.stumble_index%len(self.stumble_candidates)
-					#print "stumble index is now: "+str(self.stumble_index)
 				else:
-					#print "stumble index is now: "+str(self.stumble_index)
 					self.stumble_index = 0
 				continue
 		self.stumble_candidates = [x for x in self.stumble_candidates if x not in stumble_candidates_to_remove]
 		intro_candidates_to_remove =[]
 		for candidate in self.intro_candidates:
 			if(now-(candidate.last_intro_time)>self.INTRO_LIMIT):
-				#self.intro_candidates.remove(candidate)
 				intro_candidates_to_remove.append(candidate)
-				#self.all_candidates.remove(candidate)
 		self.intro_candidates = [x for x in self.intro_candidates if x not in intro_candidates_to_remove]
 
